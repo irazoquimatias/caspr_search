@@ -6,28 +6,39 @@ import os
 import subprocess
 import argparse
 import shutil
+import time
 from Bio import SeqIO
 import re
 
-## Parse options
+## Global variables ##
+script_dir = os.path.dirname(os.path.abspath(__file__))
+hmmer_dir = script_dir + '/data/profiles/'
+temp_dir = '/tmp/casper_search'
+
+## Check dependencies ##
+#def check_dependencies()
+#def install_dependencies()
+
+## Parse options ##
 def parse_option(parser):
-    parser.add_argument('-i', '--input', type=str, help='Archivo FASTA a analizar')
-    parser.add_argument('-o', '--output', type=str, help='Directorio de salida')
-    parser.add_argument('-s', '--so', type=str, help='Archivo so requerido por vmatch')
+    parser.add_argument('-i', '--input', type=str, required=True, help='Archivo FASTA a analizar')
+    parser.add_argument('-o', '--output', type=str, required=True, help='Directorio de salida')
+    parser.add_argument('-s', '--so', type=str, required=True, help='Archivo so requerido por vmatch')
+    parser.add_argument('--minspacer', type=int, default=17, help='Tamano minimo del spacer')
+    parser.add_argument('--maxspacer', type=int, default=50, help='Tamano maximo del spacer')
     parser.add_argument('-m', '--mismatch', type=int, default=0, help='Numero de mismatches permitidos en direct repeat')
-
+    parser.add_argument('--meta', action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
-
     args = parser.parse_args()
     return args
 
-## Look for spacers
+## Look for spacers ##
 def look_for_spacers (record, options):
     (positions, dr) = run_vmatch2 (record, options)
     extract_spacers (record, positions, options)
 
 def run_vmatch2 (record, options):
-    work_dir = '/tmp/casper_search/current_contig/'
+    work_dir = temp_dir #+ record.id
     verbose = options.verbose
     if not os.path.exists(work_dir):
         os.makedirs (work_dir)
@@ -36,11 +47,11 @@ def run_vmatch2 (record, options):
     SeqIO.write(record, 'contig.fasta', 'fasta')
 
     cmd = 'mkvtree2 -dna -pl -lcp -suf -tis -ois -bwt -bck -sti1 -db contig.fasta'
-    subprocess.run(cmd.split(' '))
+    subprocess.run(cmd.split())
 
-    cmd = 'vmatch2 -l 23 25 60 -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
+    cmd = 'vmatch2 -l %s %s -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
           -noidentity -sort sd -best 10000 -selfun %s \
-          contig.fasta' % (options.so)
+          contig.fasta' % (options.minspacer, options.maxspacer, options.so)
     salida = subprocess.getoutput(cmd)
 
     best_score = 0
@@ -62,7 +73,7 @@ def run_fuzznuc (pattern, options):
     positions = []
     cmd = 'fuzznuc -sequence contig.fasta -pattern %s -pmismatch %s -outfile fuzznuc.txt' \
     % (pattern, options.mismatch)
-    subprocess.run(cmd.split(' '), stderr = subprocess.PIPE)
+    subprocess.run(cmd.split(), stderr = subprocess.PIPE)
     with open('fuzznuc.txt', 'rU') as fuzz_report:
         for line in fuzz_report:
             if re.match('^\s+\d', line):
@@ -87,25 +98,24 @@ def extract_spacers (record, positions, options):
         spacers = spacers + '\n' + spacer + '\n'
     fasta.write(spacers)
 
-## Look for CAS
+## Look for CAS ##
 def look_for_cas (record, options):
-    run_prodigal (record, options)
-#	run_hmmsearch
+    run_prodigal (options)
+    run_hmmsearch (options)
 #	find_best_cas
 
-def run_prodigal (record, options):
-    if os.path.isfile('contig.fasta'):
-        print("esta")
-    else:
-        print("no esta")
+def run_prodigal (options):
+    cmd = "prodigal -a translation.faa -i contig.fasta -o translation.gbk"
+    if options.meta: cmd += " -p meta"
+    subprocess.run(cmd.split(), stderr=subprocess.PIPE)
 
-#def run_hmmsearch ():
-
+def run_hmmsearch (options):
+    cmd = "hmmsearch --domtblout search.txt $i cas14a_proteins.faa
 #def find_best_cas ():
 
-## Wrap everything
+## Wrap everything ##
 
-## Main
+## Main ##
 def main():
     #bool_dependencies = check_dependencies()
     #if not bool_dependencies:
@@ -115,17 +125,27 @@ def main():
     current_dir = os.getcwd()
     if not re.match('^/', options.output):
         options.output = current_dir + '/' + options.output
-    if os.path.exists(options.output):
-        print("ERROR: la carpeta de salida existe")
-        exit
-    os.makedirs(options.output)
-    if not os.path.exists("/tmp/casper_search"):
-        os.makedirs ("/tmp/casper_search")
+    if os.path.exists(options.output) and os.listdir(options.output):
+        print("ERROR: la carpeta de salida no esta vacia")
+        exit()
+    if not os.path.exists(options.output):
+        os.makedirs(options.output)
+    if not os.path.exists(temp_dir):
+        os.makedirs (temp_dir)
     with open(options.input, "rU") as in_fasta:
         for record in SeqIO.parse(in_fasta, "fasta"):
+            now = time.process_time()
+            msg = "Sequence " + record.id + " started at " + str(time.asctime())
+            print (msg)
             look_for_spacers(record, options)
+            time_stamp = time.process_time() - now
+            msg = "look_for_spacers took " + str(time_stamp)
+            print (msg)
             look_for_cas(record, options)
-    shutil.rmtree("/tmp/casper_search")
+            time_stamp = time.process_time() - now
+            msg = "look_for_cas took " + str(time_stamp)
+            print (msg)
+     #shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
     main()
