@@ -1,5 +1,6 @@
-# casper_search
+# caspr_search
 Dependencies:
+
   vmatch2: http://vmatch.de/distributions/vmatch-2.3.0-Linux_x86_64-64bit.tar.gz
   
   emboss: sudo apt-get install emboss
