@@ -37,8 +37,9 @@ def parse_option(parser):
 
 ## Look for spacers ##
 def look_for_spacers (record, options):
-    (positions, dr) = run_vmatch2 (record, options)
-    extract_spacers (record, positions, options)
+    dr = run_vmatch2 (record, options)
+    extract_spacers (record, dr['positions'], options)
+    return dr
 
 def run_vmatch2 (record, options):
     work_dir = temp_dir + '/' + record.id
@@ -52,39 +53,46 @@ def run_vmatch2 (record, options):
     cmd = 'mkvtree2 -dna -pl -lcp -suf -tis -ois -bwt -bck -sti1 -db contig.fasta'
     subprocess.run(cmd.split())
 
-    cmd = 'vmatch2 -l %s %s -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
+    cmd = 'vmatch2 -l 25 %s %s -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
           -noidentity -sort sd -best 10000 -selfun %s \
           contig.fasta' % (options.minspacer, options.maxspacer, options.so)
     salida = subprocess.getoutput(cmd)
 
-    best_score = 0
-    best_positions = []
-    best_dr = ''
-    for l in salida.split('\n'):
-        l = l.rstrip()
-        if re.match('^>', l) or not l:
+    best = { 'id': record.id,
+             'score': 0,
+             'mismatchs': 0,
+             'positions': [],
+             'dr': '' }
+    cont = 0
+    for line in salida.split('\n'):
+        line = line.rstrip()
+        if re.match('^>', line) or not line:
             continue
-        (score, positions) = run_fuzznuc(l, options)
-        if score > best_score:
-            best_score = score
-            best_positions = positions
-            best_dr = l
-    return (best_positions, best_dr)
+        (score, positions, mismatchs) = run_fuzznuc(line, options, cont)
+        cont += 1
+        if score > best['score']:
+            best['score'] = score
+            best['positions'] = positions
+            best['dr'] = line
+            best['mismatchs'] = mismatchs
+    return best
 
-def run_fuzznuc (pattern, options):
+def run_fuzznuc (pattern, options, cont):
     score = 0
+    mismatchs = 0
     positions = []
-    cmd = 'fuzznuc -sequence contig.fasta -pattern %s -pmismatch %s -outfile fuzznuc.txt' \
-    % (pattern, options.mismatch)
+    cmd = 'fuzznuc -sequence contig.fasta -pattern %s -pmismatch %s -outfile %s' \
+    % (pattern, options.mismatch, str('fuzznuc'+str(cont)+'.txt'))
     subprocess.run(cmd.split(), stderr = subprocess.PIPE)
-    with open('fuzznuc.txt', 'rU') as fuzz_report:
+    with open(str('fuzznuc'+str(cont)+'.txt'), 'rU') as fuzz_report:
         for line in fuzz_report:
             if re.match('^\s+\d', line):
                 columns = line.split()
                 columns[4] = 0 if columns[4] == '.' else columns[4]
                 score = score + len(columns[5]) - int(columns[4])
-                positions.append((columns[0],columns[1]))
-    return (score, positions)
+                if int(columns[4]) > 0: mismatchs += 1
+                positions.append((int(columns[0]),int(columns[1])))
+    return (score, positions, mismatchs)
 
 def extract_spacers (record, positions, options):
     outfasta = options.output + '/CRISPR.fasta'
@@ -94,8 +102,8 @@ def extract_spacers (record, positions, options):
     else:
         fasta = open(outfasta, 'w')
     for i in range (0, len(positions)-2):
-        start = int(positions[i][1])+2 # +1 por el indice, +1 porque el spacer empieza despues del repeat
-        end = int(positions[i+1][0])
+        start = positions[i][1]+2 # +1 por el indice, +1 porque el spacer empieza despues del repeat
+        end = positions[i+1][0]
         spacer = str(record.seq)[start:end]
         spacers = spacers + '>' + record.id + '_' + str(start) + '_' + str(end)
         spacers = spacers + '\n' + spacer + '\n'
@@ -124,12 +132,16 @@ def find_best_cas ():
             if not re.match('^#', line):
                 fields = line.split()
                 if not fields[0] in genes:
+                    partial = re.match('.*partial\=(\d+)', fields[29])
                     genes[fields[0]] = {'len': int(fields[2]),
                                         'start': int(fields[23]),
                                         'end': int(fields[25]),
+                                        'strand':int(fields[27]),
+                                        'partial': partial.group(1),
                                         'annotation': '',
                                         'evalue': 9999,
                                         'aligned': 0,
+                                        'score':999,
                                         'annotations': {} }
                 if not fields[3] in genes[fields[0]]['annotations']:
                     genes[fields[0]]['annotations'][fields[3]] = {'evalue': float(fields[6]),
@@ -137,9 +149,23 @@ def find_best_cas ():
                 else:
                     genes[fields[0]]['annotations'][fields[3]]['evalue'] += float(fields[6])
                     genes[fields[0]]['annotations'][fields[3]]['aligned'] += float((int(fields[18]) - int(fields[17]) + 1)/int(fields[2]))
+    for g in genes:
+        for a in genes[g]['annotations']:
+            score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
+            if score < genes[fields[0]]['score']:
+                genes[g]['annotation'] = a
+                genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
+                genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
+                genes[g]['score'] = score
     return genes
-## Wrap everything ##
 
+## Write output ##
+def write_output(results, options):
+    report = 'Contig\t# repeats\tLength repeats\tStart repeats\tEnd repeats\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
+    for c in results:
+        start_dr = results[c]['crisprs']['positions'[0][0]
+        end_dr = results[c]['crisprs']['positions'[-1][1]
+        
 ## Main ##
 def main():
     #bool_dependencies = check_dependencies()
@@ -147,6 +173,7 @@ def main():
         #install_dependencies()
     parser = argparse.ArgumentParser(description='')
     options = parse_option(parser)
+
     current_dir = os.getcwd()
     if not re.match('^/', options.output):
         options.output = current_dir + '/' + options.output
@@ -155,26 +182,31 @@ def main():
         exit()
     if not os.path.exists(options.output):
         os.makedirs(options.output)
-    if not os.path.exists(temp_dir):
-        os.makedirs (temp_dir)
-    crispr_out = open(str(options.output + '/crisprs.txt'), 'w')
-    genes_out = open(str(options.output + '/genes.txt'), 'w')
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs (temp_dir)
+
+    results = {}
     with open(options.input, 'rU') as in_fasta:
         for record in SeqIO.parse(in_fasta, 'fasta'):
             now = time.process_time()
             msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
             print (msg)
-            look_for_spacers(record, options)
-#            print(crisprs, file=crispr_out)
+            crisprs = look_for_spacers(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_spacers took ' + str(time_stamp)
             print (msg)
+            now = time.process_time()
             genes = look_for_cas(record, options)
-            print(genes, file=genes_out)
             time_stamp = time.process_time() - now
             msg = 'look_for_cas took ' + str(time_stamp)
             print (msg)
-     #shutil.rmtree(temp_dir)
+            results[record.id] = {'crisprs': crisprs,
+                                  'genes': genes }
+
+    write_results(results, options)
+    #write_cas_fasta()
+    #shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
     main()
