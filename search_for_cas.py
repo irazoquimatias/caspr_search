@@ -127,16 +127,17 @@ def run_hmmsearch (options):
 
 def find_best_cas ():
     genes = {}
+    strand = 0
     with open('search.txt', 'rU') as search:
         for line in search:
             if not re.match('^#', line):
                 fields = line.split()
                 if not fields[0] in genes:
                     partial = re.match('.*partial\=(\d+)', fields[29])
+                    strand=int(fields[27])
                     genes[fields[0]] = {'len': int(fields[2]),
                                         'start': int(fields[23]),
                                         'end': int(fields[25]),
-                                        'strand':int(fields[27]),
                                         'partial': partial.group(1),
                                         'annotation': '',
                                         'evalue': 9999,
@@ -152,20 +153,54 @@ def find_best_cas ():
     for g in genes:
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
-            if score < genes[fields[0]]['score']:
+            if score < genes[fields[0]]['score'] and genes[g]['annotations'][a]['aligned'] >= 0.7:
                 genes[g]['annotation'] = a
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
                 genes[g]['score'] = score
-    return genes
+    return (genes, strand)
 
 ## Write output ##
 def write_output(results, options):
-    report = 'Contig\t# repeats\tLength repeats\tStart repeats\tEnd repeats\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
+    outfile = options.output + '/Results.tsv'
+    report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t# repeats w/mismatchs\
+              \t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
     for c in results:
-        start_dr = results[c]['crisprs']['positions'[0][0]
-        end_dr = results[c]['crisprs']['positions'[-1][1]
-        
+        start_dr = 0
+        end_dr =0
+        if results[c]['strand'] == 1:
+            start_dr = results[c]['crisprs']['positions'][0][0]
+            end_dr = results[c]['crisprs']['positions'][-1][1]
+        else:
+            start_dr = results[c]['crisprs']['positions'][-1][1]
+            end_dr = results[c]['crisprs']['positions'][0][0]
+
+        number_repeats = len(results[c]['crisprs']['positions'])
+        length = 0
+        for i in range(number_repeats-1, 1, -1):
+            length += results[c]['crisprs']['positions'][i][0] - results[c]['crisprs']['positions'][i-1][1] + 1
+        avg_length = length / (number_repeats - 1)
+
+        cas_cassette = []
+        strand = 0
+        for cas in results[c]['genes']:
+            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], results[c]['genes'][cas]['end']))
+        if results[c]['strand']==1:
+            cas_cassette.sort(key=lambda x:x[1])
+        else:
+            cas_cassette.sort(key=lambda x:x[1], reverse=True)
+
+        report += c + '\t' + str(number_repeats) + '\t' + str(len(results[c]['crisprs']['dr'])) + '\t' + str(results[c]['strand']) + '\t'
+        report += str(start_dr) + '\t' + str(end_dr) + '\t' + str(results[c]['crisprs']['mismatchs']) + '\t'
+        report += str(number_repeats - 1) + '\t' + str(round(avg_length,2)) + '\t' + str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
+        for cas in cas_cassette:
+            report += cas[0] + ';'
+        report.strip(';')
+        report += '\n'
+
+    with open (outfile, 'w') as o:
+        o.write(report)
+
 ## Main ##
 def main():
     #bool_dependencies = check_dependencies()
@@ -191,22 +226,26 @@ def main():
         for record in SeqIO.parse(in_fasta, 'fasta'):
             now = time.process_time()
             msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
-            print (msg)
+            if options.verbose: print (msg)
             crisprs = look_for_spacers(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_spacers took ' + str(time_stamp)
-            print (msg)
+            if options.verbose: print (msg)
             now = time.process_time()
-            genes = look_for_cas(record, options)
+            (genes,strand) = look_for_cas(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_cas took ' + str(time_stamp)
-            print (msg)
+            if options.verbose: print (msg)
+            now = time.process_time()
             results[record.id] = {'crisprs': crisprs,
-                                  'genes': genes }
-
-    write_results(results, options)
+                                  'genes': genes,
+                                  'strand': strand }
+            time_stamp = time.process_time() - now
+            msg = 'writing took ' + str(time_stamp)
+            if options.verbose: print (msg)
+    write_output(results, options)
     #write_cas_fasta()
-    #shutil.rmtree(temp_dir)
+    shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
     main()
