@@ -15,7 +15,7 @@ from Bio import SeqIO
 script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
 profile_path = script_dir + '/data/profiles.hmm'
-temp_dir = '/tmp/casper_search'
+temp_dir = '/tmp/caspr_search'
 
 ## Check dependencies ##
 #def check_dependencies()
