@@ -50,10 +50,10 @@ def run_vmatch2 (record, options):
 
     SeqIO.write(record, 'contig.fasta', 'fasta')
 
-    cmd = 'mkvtree2 -dna -pl -lcp -suf -tis -ois -bwt -bck -sti1 -db contig.fasta'
+    cmd = 'mkvtree -dna -pl -lcp -suf -tis -ois -bwt -bck -sti1 -db contig.fasta'
     subprocess.run(cmd.split())
 
-    cmd = 'vmatch2 -l 25 %s %s -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
+    cmd = 'vmatch -l 25 %s %s -s leftseq -evalue 0.001 -absolute -noevalue -noscore \
           -noidentity -sort sd -best 10000 -selfun %s \
           contig.fasta' % (options.minspacer, options.maxspacer, options.so)
     salida = subprocess.getoutput(cmd)
@@ -84,7 +84,7 @@ def run_fuzznuc (pattern, options, cont):
     cmd = 'fuzznuc -sequence contig.fasta -pattern %s -pmismatch %s -outfile %s' \
     % (pattern, options.mismatch, str('fuzznuc'+str(cont)+'.txt'))
     subprocess.run(cmd.split(), stderr = subprocess.PIPE)
-    with open(str('fuzznuc'+str(cont)+'.txt'), 'rU') as fuzz_report:
+    with open(str('fuzznuc'+str(cont)+'.txt'), 'r') as fuzz_report:
         for line in fuzz_report:
             if re.match('^\s+\d', line):
                 columns = line.split()
@@ -128,7 +128,7 @@ def run_hmmsearch (options):
 def find_best_cas ():
     genes = {}
     strand = 0
-    with open('search.txt', 'rU') as search:
+    with open('search.txt', 'r') as search:
         for line in search:
             if not re.match('^#', line):
                 fields = line.split()
@@ -222,7 +222,7 @@ def main():
     os.makedirs (temp_dir)
 
     results = {}
-    with open(options.input, 'rU') as in_fasta:
+    with open(options.input, 'r') as in_fasta:
         for record in SeqIO.parse(in_fasta, 'fasta'):
             now = time.process_time()
             msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
