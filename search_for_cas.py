@@ -12,9 +12,10 @@ import pprint
 from Bio import SeqIO
 
 ## Global variables ##
+current_dir = os.getcwd()
 script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
-profile_path = script_dir + '/data/profiles.hmm'
+profile_path = script_dir + '/data/orig.hmm'
 temp_dir = '/tmp/caspr_search'
 
 ## Check dependencies ##
@@ -33,6 +34,7 @@ def parse_option(parser):
     parser.add_argument('--profiles', default=profile_path, help='Archivo con los perfiles a buscar')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
+    args.profiles = os.path.abspath(args.profiles)
     return args
 
 ## Look for spacers ##
@@ -128,6 +130,17 @@ def run_hmmsearch (options):
 def find_best_cas ():
     genes = {}
     strand = 0
+    if not os.path.exists('search.txt'):
+        genes['no_genes'] = {'len': int(fields[2]),
+                                        'start': 0,
+                                        'end': 1,
+                                        'partial': 00,
+                                        'annotation': 'No genes predicted',
+                                        'evalue': 9999,
+                                        'aligned': 0,
+                                        'score':999,
+                                        'annotations': {} }
+        return (genes, strand)
     with open('search.txt', 'r') as search:
         for line in search:
             if not re.match('^#', line):
@@ -166,25 +179,28 @@ def write_output(results, options):
     report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t# repeats w/mismatchs\
               \t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
     for c in results:
+        if len(results[c]['crisprs']['positions']) == 0 and 
         start_dr = 0
         end_dr =0
         if results[c]['strand'] == 1:
             start_dr = results[c]['crisprs']['positions'][0][0]
             end_dr = results[c]['crisprs']['positions'][-1][1]
-        else:
+        elif results[c]['strand'] == -1:
             start_dr = results[c]['crisprs']['positions'][-1][1]
             end_dr = results[c]['crisprs']['positions'][0][0]
 
         number_repeats = len(results[c]['crisprs']['positions'])
         length = 0
-        for i in range(number_repeats-1, 1, -1):
-            length += results[c]['crisprs']['positions'][i][0] - results[c]['crisprs']['positions'][i-1][1] + 1
-        avg_length = length / (number_repeats - 1)
+        avg_length = 0
+        if number_repeats > 0:
+            for i in range(number_repeats-1, 1, -1):
+                length += results[c]['crisprs']['positions'][i][0] - results[c]['crisprs']['positions'][i-1][1] + 1
+            avg_length = length / (number_repeats - 1)
 
         cas_cassette = []
         strand = 0
         for cas in results[c]['genes']:
-            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], results[c]['genes'][cas]['end']))
+            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
         if results[c]['strand']==1:
             cas_cassette.sort(key=lambda x:x[1])
         else:
@@ -192,10 +208,14 @@ def write_output(results, options):
 
         report += c + '\t' + str(number_repeats) + '\t' + str(len(results[c]['crisprs']['dr'])) + '\t' + str(results[c]['strand']) + '\t'
         report += str(start_dr) + '\t' + str(end_dr) + '\t' + str(results[c]['crisprs']['mismatchs']) + '\t'
-        report += str(number_repeats - 1) + '\t' + str(round(avg_length,2)) + '\t' + str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
-        for cas in cas_cassette:
-            report += cas[0] + ';'
-        report.strip(';')
+        report += str(number_repeats - 1) + '\t' + str(round(avg_length,2))
+        if cas_cassette:
+            report += '\t' + str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
+            for cas in cas_cassette:
+               report += cas[0]
+               if cas[3] != '00': report += '*' # If partial, add '*' to the name of the gene
+               report += ';'
+            report.strip(';')
         report += '\n'
 
     with open (outfile, 'w') as o:
@@ -209,7 +229,6 @@ def main():
     parser = argparse.ArgumentParser(description='')
     options = parse_option(parser)
 
-    current_dir = os.getcwd()
     if not re.match('^/', options.output):
         options.output = current_dir + '/' + options.output
     if os.path.exists(options.output) and os.listdir(options.output):
@@ -229,23 +248,23 @@ def main():
             if options.verbose: print (msg)
             crisprs = look_for_spacers(record, options)
             time_stamp = time.process_time() - now
-            msg = 'look_for_spacers took ' + str(time_stamp)
+            msg = 'look_for_spacers took ' + str(round(time_stamp,4)) + ' seconds'
             if options.verbose: print (msg)
             now = time.process_time()
             (genes,strand) = look_for_cas(record, options)
             time_stamp = time.process_time() - now
-            msg = 'look_for_cas took ' + str(time_stamp)
+            msg = 'look_for_cas took ' + str(round(time_stamp, 4)) + ' seconds'
             if options.verbose: print (msg)
             now = time.process_time()
             results[record.id] = {'crisprs': crisprs,
                                   'genes': genes,
                                   'strand': strand }
             time_stamp = time.process_time() - now
-            msg = 'writing took ' + str(time_stamp)
+            msg = 'writing took ' + str(round(time_stamp,4)) + ' seconds'
             if options.verbose: print (msg)
     write_output(results, options)
     #write_cas_fasta()
-    shutil.rmtree(temp_dir)
+    #shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
     main()
