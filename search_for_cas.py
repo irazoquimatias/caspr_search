@@ -15,7 +15,7 @@ from Bio import SeqIO
 current_dir = os.getcwd()
 script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
-profile_path = script_dir + '/data/orig.hmm'
+profile_path = script_dir + '/data/originales.hmm'
 temp_dir = '/tmp/caspr_search'
 
 ## Check dependencies ##
@@ -130,39 +130,40 @@ def run_hmmsearch (options):
 def find_best_cas ():
     genes = {}
     strand = 0
-    if not os.path.exists('search.txt'):
-        genes['no_genes'] = {'len': int(fields[2]),
-                                        'start': 0,
-                                        'end': 1,
-                                        'partial': 00,
-                                        'annotation': 'No genes predicted',
-                                        'evalue': 9999,
-                                        'aligned': 0,
-                                        'score':999,
-                                        'annotations': {} }
-        return (genes, strand)
-    with open('search.txt', 'r') as search:
-        for line in search:
-            if not re.match('^#', line):
-                fields = line.split()
-                if not fields[0] in genes:
-                    partial = re.match('.*partial\=(\d+)', fields[29])
-                    strand=int(fields[27])
-                    genes[fields[0]] = {'len': int(fields[2]),
-                                        'start': int(fields[23]),
-                                        'end': int(fields[25]),
-                                        'partial': partial.group(1),
-                                        'annotation': '',
-                                        'evalue': 9999,
-                                        'aligned': 0,
-                                        'score':999,
-                                        'annotations': {} }
-                if not fields[3] in genes[fields[0]]['annotations']:
-                    genes[fields[0]]['annotations'][fields[3]] = {'evalue': float(fields[6]),
+    if os.path.exists('search.txt'):
+        with open('search.txt', 'r') as search:
+            for line in search:
+                if not re.match('^#', line):
+                    fields = line.split()
+                    if not fields[0] in genes:
+                        partial = re.match('.*partial\=(\d+)', fields[29])
+                        strand=int(fields[27])
+                        genes[fields[0]] = {'len': int(fields[2]),
+                                            'start': int(fields[23]),
+                                            'end': int(fields[25]),
+                                            'partial': partial.group(1),
+                                            'annotation': '',
+                                            'evalue': 9999,
+                                            'aligned': 0,
+                                            'score':999,
+                                            'annotations': {} }
+                    if not fields[3] in genes[fields[0]]['annotations']:
+                        genes[fields[0]]['annotations'][fields[3]] = {'evalue': float(fields[6]),
                                                                  'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])) }
-                else:
-                    genes[fields[0]]['annotations'][fields[3]]['evalue'] += float(fields[6])
-                    genes[fields[0]]['annotations'][fields[3]]['aligned'] += float((int(fields[18]) - int(fields[17]) + 1)/int(fields[2]))
+                    else:
+                        genes[fields[0]]['annotations'][fields[3]]['evalue'] += float(fields[6])
+                        genes[fields[0]]['annotations'][fields[3]]['aligned'] += float((int(fields[18]) - int(fields[17]) + 1)/int(fields[2]))
+    else:
+        genes['no_genes'] = {'len': 0,
+                             'start': 0,
+                             'end': 1,
+                             'partial': 00,
+                             'annotation': 'No genes predicted',
+                             'evalue': 9999,
+                             'aligned': 0,
+                             'score':999,
+                             'annotations': {} }
+        return (genes, strand)
     for g in genes:
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
@@ -179,7 +180,6 @@ def write_output(results, options):
     report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t# repeats w/mismatchs\
               \t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
     for c in results:
-        if len(results[c]['crisprs']['positions']) == 0 and 
         start_dr = 0
         end_dr =0
         if results[c]['strand'] == 1:
@@ -246,22 +246,22 @@ def main():
             now = time.process_time()
             msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
             if options.verbose: print (msg)
+            
             crisprs = look_for_spacers(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_spacers took ' + str(round(time_stamp,4)) + ' seconds'
             if options.verbose: print (msg)
+            
             now = time.process_time()
             (genes,strand) = look_for_cas(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_cas took ' + str(round(time_stamp, 4)) + ' seconds'
             if options.verbose: print (msg)
-            now = time.process_time()
-            results[record.id] = {'crisprs': crisprs,
-                                  'genes': genes,
-                                  'strand': strand }
-            time_stamp = time.process_time() - now
-            msg = 'writing took ' + str(round(time_stamp,4)) + ' seconds'
-            if options.verbose: print (msg)
+            
+            if not 'no_genes' in genes and len(crisprs['positions']) != 0:
+                results[record.id] = {'crisprs': crisprs,
+                                      'genes': genes,
+                                      'strand': strand }
     write_output(results, options)
     #write_cas_fasta()
     #shutil.rmtree(temp_dir)
