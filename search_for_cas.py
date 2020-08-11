@@ -8,15 +8,18 @@ import argparse
 import re
 import shutil
 import time
-import pprint
+from pprint import pprint
 from Bio import SeqIO
 
 ## Global variables ##
 current_dir = os.getcwd()
 script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
-profile_path = script_dir + '/data/originales.hmm'
+profile_path = script_dir + '/data/profiles.hmm'
 temp_dir = '/tmp/caspr_search'
+list_effectors = ['cas12d', 'cas12e', 'cas12i', 'cas13d', 'cas14a', 
+                 'cas14b', 'cas14c', 'cas14d', 'cas14e', 'cas14f', 
+                 'cas14g', 'cas14h', 'cas14u']
 
 ## Check dependencies ##
 #def check_dependencies()
@@ -146,9 +149,11 @@ def find_best_cas ():
                                             'evalue': 9999,
                                             'aligned': 0,
                                             'score':999,
+                                            'effector':'FALSE',
                                             'annotations': {} }
                     if not fields[3] in genes[fields[0]]['annotations']:
-                        genes[fields[0]]['annotations'][fields[3]] = {'evalue': float(fields[6]),
+                        genes[fields[0]]['annotations'][fields[3]] = { 'length': fields[2],
+                                                                 'evalue': float(fields[6]),
                                                                  'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])) }
                     else:
                         genes[fields[0]]['annotations'][fields[3]]['evalue'] += float(fields[6])
@@ -162,6 +167,7 @@ def find_best_cas ():
                              'evalue': 9999,
                              'aligned': 0,
                              'score':999,
+                             'effector':'FALSE',
                              'annotations': {} }
         return (genes, strand)
     for g in genes:
@@ -169,6 +175,8 @@ def find_best_cas ():
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
             if score < genes[fields[0]]['score'] and genes[g]['annotations'][a]['aligned'] >= 0.7:
                 genes[g]['annotation'] = a
+                if a in list_effectors: genes[g]['effector'] = 'TRUE'
+                genes[g]['length'] = genes[g]['annotations'][a]['length']
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
                 genes[g]['score'] = score
@@ -177,8 +185,9 @@ def find_best_cas ():
 ## Write output ##
 def write_output(results, options):
     outfile = options.output + '/Results.tsv'
-    report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t# repeats w/mismatchs\
-              \t#CRISPRs\tAvg length CRISPR\tStart Cas\tEnd Cas\tCas cassette\n'
+    report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t\
+              Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t\
+              Efector\tLargo efector\tStart Cas\tEnd Cas\tCas cassette\n'
     for c in results:
         start_dr = 0
         end_dr =0
@@ -198,19 +207,28 @@ def write_output(results, options):
             avg_length = length / (number_repeats - 1)
 
         cas_cassette = []
+        effector = []
         strand = 0
         for cas in results[c]['genes']:
-            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
+            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], 
+                                 results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
+            if results[c]['genes'][cas]['effector'] == 'TRUE': 
+                effector.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length']))
         if results[c]['strand']==1:
             cas_cassette.sort(key=lambda x:x[1])
         else:
             cas_cassette.sort(key=lambda x:x[1], reverse=True)
 
         report += c + '\t' + str(number_repeats) + '\t' + str(len(results[c]['crisprs']['dr'])) + '\t' + str(results[c]['strand']) + '\t'
-        report += str(start_dr) + '\t' + str(end_dr) + '\t' + str(results[c]['crisprs']['mismatchs']) + '\t'
-        report += str(number_repeats - 1) + '\t' + str(round(avg_length,2))
+        report += str(start_dr) + '\t' + str(end_dr) + '\t' + results[c]['crisprs']['dr'] + '\t'
+        report += str(results[c]['crisprs']['mismatchs']) + '\t'
+        report += str(number_repeats - 1) + '\t' + str(round(avg_length,2)) + '\t'
+        if effector:
+            report += effector[0][0] + '\t' + str(effector[0][1]) + '\t'
+        else:
+            report += 'No effector found\t0\t'
         if cas_cassette:
-            report += '\t' + str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
+            report += str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
             for cas in cas_cassette:
                report += cas[0]
                if cas[3] != '00': report += '*' # If partial, add '*' to the name of the gene
