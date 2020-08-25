@@ -17,8 +17,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
 profile_path = script_dir + '/data/profiles.hmm'
 temp_dir = '/tmp/caspr_search'
-list_effectors = ['cas12d', 'cas12e', 'cas12i', 'cas13d', 'cas14a', 
-                 'cas14b', 'cas14c', 'cas14d', 'cas14e', 'cas14f', 
+list_effectors = ['cas12d', 'cas12e', 'cas12i', 'cas13d', 'cas14a',
+                 'cas14b', 'cas14c', 'cas14d', 'cas14e', 'cas14f',
                  'cas14g', 'cas14h', 'cas14u']
 
 ## Check dependencies ##
@@ -154,10 +154,17 @@ def find_best_cas ():
                     if not fields[3] in genes[fields[0]]['annotations']:
                         genes[fields[0]]['annotations'][fields[3]] = { 'length': fields[2],
                                                                  'evalue': float(fields[6]),
-                                                                 'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])) }
+                                                                 'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])),
+                                                                 'hmm_length': int(fields[5]),
+                                                                 'hmm_start': int(fields[15]),
+                                                                 'hmm_end': int(fields[16])}
                     else:
                         genes[fields[0]]['annotations'][fields[3]]['evalue'] += float(fields[6])
                         genes[fields[0]]['annotations'][fields[3]]['aligned'] += float((int(fields[18]) - int(fields[17]) + 1)/int(fields[2]))
+                        if int(fields[15]) < genes[fields[0]]['annotations'][fields[3]]['hmm_start']:
+                            genes[fields[0]]['annotations'][fields[3]]['hmm_start'] = int(fields[15])
+                        if int(fields[16]) > genes[fields[0]]['annotations'][fields[3]]['hmm_end']:
+                            genes[fields[0]]['annotations'][fields[3]]['hmm_end'] = int(fields[16])
     else:
         genes['no_genes'] = {'len': 0,
                              'start': 0,
@@ -174,11 +181,13 @@ def find_best_cas ():
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
             if score < genes[fields[0]]['score'] and genes[g]['annotations'][a]['aligned'] >= 0.7:
-                genes[g]['annotation'] = a
                 if a in list_effectors: genes[g]['effector'] = 'TRUE'
                 genes[g]['length'] = genes[g]['annotations'][a]['length']
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
+                genes[g]['hmm_length'] = genes[g]['annotations'][a]['hmm_length']
+                genes[g]['hmm_start'] = genes[g]['annotations'][a]['hmm_start']
+                genes[g]['hmm_end'] = genes[g]['annotations'][a]['hmm_end']
                 genes[g]['score'] = score
     return (genes, strand)
 
@@ -187,7 +196,8 @@ def write_output(results, options):
     outfile = options.output + '/Results.tsv'
     report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t\
               Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t\
-              Efector\tLargo efector\tStart Cas\tEnd Cas\tCas cassette\n'
+              Efector\tLargo efector\tLength HMM efectoy\tStart HMM efector\tEnd HMM efector\t\
+              Start Cas\tEnd Cas\tCas cassette\n'
     for c in results:
         start_dr = 0
         end_dr =0
@@ -210,10 +220,12 @@ def write_output(results, options):
         effector = []
         strand = 0
         for cas in results[c]['genes']:
-            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'], 
+            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'],
                                  results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
-            if results[c]['genes'][cas]['effector'] == 'TRUE': 
-                effector.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length']))
+            if results[c]['genes'][cas]['effector'] == 'TRUE':
+                effector.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length'],
+                                 results[c]['genes'][cas]['hmm_length'], results[c]['genes'][cas]['hmm_start'],
+                                 results[c]['genes'][cas]['hmm_end']))
         if results[c]['strand']==1:
             cas_cassette.sort(key=lambda x:x[1])
         else:
@@ -224,7 +236,8 @@ def write_output(results, options):
         report += str(results[c]['crisprs']['mismatchs']) + '\t'
         report += str(number_repeats - 1) + '\t' + str(round(avg_length,2)) + '\t'
         if effector:
-            report += effector[0][0] + '\t' + str(effector[0][1]) + '\t'
+            report += effector[0][0] + '\t' + str(effector[0][1]) + '\t' + str(effector[0][2]) + '\t'
+            report += str(effector[0][3]) + '\t' + str(effector[0][4]) + '\t'
         else:
             report += 'No effector found\t0\t'
         if cas_cassette:
@@ -254,9 +267,9 @@ def main():
         exit()
     if not os.path.exists(options.output):
         os.makedirs(options.output)
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs (temp_dir)
+    if not os.path.exists(temp_dir):
+        #shutil.rmtree(temp_dir)
+        os.makedirs (temp_dir)
 
     results = {}
     with open(options.input, 'r') as in_fasta:
@@ -264,18 +277,18 @@ def main():
             now = time.process_time()
             msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
             if options.verbose: print (msg)
-            
+
             crisprs = look_for_spacers(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_spacers took ' + str(round(time_stamp,4)) + ' seconds'
             if options.verbose: print (msg)
-            
+
             now = time.process_time()
             (genes,strand) = look_for_cas(record, options)
             time_stamp = time.process_time() - now
             msg = 'look_for_cas took ' + str(round(time_stamp, 4)) + ' seconds'
             if options.verbose: print (msg)
-            
+
             if not 'no_genes' in genes and len(crisprs['positions']) != 0:
                 results[record.id] = {'crisprs': crisprs,
                                       'genes': genes,
