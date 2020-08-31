@@ -8,8 +8,9 @@ import argparse
 import re
 import shutil
 import time
-from pprint import pprint
 from Bio import SeqIO
+from Bio.Seq import Seq
+from multiprocessing import Pool
 
 ## Global variables ##
 current_dir = os.getcwd()
@@ -35,18 +36,34 @@ def parse_option(parser):
     parser.add_argument('-m', '--mismatch', type=int, default=0, help='Numero de mismatches permitidos en direct repeat')
     parser.add_argument('--meta', action='store_true')
     parser.add_argument('--profiles', default=profile_path, help='Archivo con los perfiles a buscar')
+    parser.add_argument('-t', '--threads', type=int, default=1, help='Numero de procesadores')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
     args.profiles = os.path.abspath(args.profiles)
     return args
 
+## Search everything
+def search_everything (record):
+    dr = look_for_spacers(record)
+    (genes,strand) = look_for_cas(record)
+    for g in genes:
+        if genes[g]['effector']:
+            gene_nt = Seq(str(record.seq)[(genes[g]['start']-1):genes[g]['end']])
+            if strand == -1:
+                gene_nt = gene_nt.reverse_complement()
+            gene_aa = str(gene_nt.translate())
+            genes[g]['sequence'] = gene_aa
+    this_temp_dir = temp_dir + '/' + record.id
+    shutil.rmtree(this_temp_dir)
+    return (record.id, dr, genes, strand)
+
 ## Look for spacers ##
-def look_for_spacers (record, options):
-    dr = run_vmatch2 (record, options)
-    extract_spacers (record, dr['positions'], options)
+def look_for_spacers (record):
+    dr = run_vmatch2 (record)
+    extract_spacers (record, dr['positions'])
     return dr
 
-def run_vmatch2 (record, options):
+def run_vmatch2 (record):
     work_dir = temp_dir + '/' + record.id
     verbose = options.verbose
     if not os.path.exists(work_dir):
@@ -73,7 +90,7 @@ def run_vmatch2 (record, options):
         line = line.rstrip()
         if re.match('^>', line) or not line:
             continue
-        (score, positions, mismatchs) = run_fuzznuc(line, options, cont)
+        (score, positions, mismatchs) = run_fuzznuc(line, cont)
         cont += 1
         if score > best['score']:
             best['score'] = score
@@ -82,7 +99,7 @@ def run_vmatch2 (record, options):
             best['mismatchs'] = mismatchs
     return best
 
-def run_fuzznuc (pattern, options, cont):
+def run_fuzznuc (pattern, cont):
     score = 0
     mismatchs = 0
     positions = []
@@ -99,7 +116,7 @@ def run_fuzznuc (pattern, options, cont):
                 positions.append((int(columns[0]),int(columns[1])))
     return (score, positions, mismatchs)
 
-def extract_spacers (record, positions, options):
+def extract_spacers (record, positions):
     outfasta = options.output + '/CRISPR.fasta'
     spacers = ''
     if os.path.isfile(outfasta):
@@ -115,18 +132,18 @@ def extract_spacers (record, positions, options):
     fasta.write(spacers)
 
 ## Look for CAS ##
-def look_for_cas (record, options):
-    run_prodigal (options)
-    run_hmmsearch (options)
+def look_for_cas (record):
+    run_prodigal ()
+    run_hmmsearch ()
     genes = find_best_cas ()
     return genes
 
-def run_prodigal (options):
+def run_prodigal ():
     cmd = 'prodigal -a translation.faa -i contig.fasta -o translation.gbk'
     if options.meta: cmd += ' -p meta'
     subprocess.run(cmd.split(), stderr=subprocess.PIPE)
 
-def run_hmmsearch (options):
+def run_hmmsearch ():
     cmd = 'hmmsearch --domtblout search.txt %s translation.faa' % (options.profiles)
     subprocess.run(cmd.split(), stderr=subprocess.PIPE, stdout=subprocess.PIPE)
 
@@ -141,7 +158,7 @@ def find_best_cas ():
                     if not fields[0] in genes:
                         partial = re.match('.*partial\=(\d+)', fields[29])
                         strand=int(fields[27])
-                        genes[fields[0]] = {'len': int(fields[2]),
+                        genes[fields[0]] = {'length': int(fields[2]),
                                             'start': int(fields[23]),
                                             'end': int(fields[25]),
                                             'partial': partial.group(1),
@@ -152,7 +169,7 @@ def find_best_cas ():
                                             'effector':'FALSE',
                                             'annotations': {} }
                     if not fields[3] in genes[fields[0]]['annotations']:
-                        genes[fields[0]]['annotations'][fields[3]] = { 'length': fields[2],
+                        genes[fields[0]]['annotations'][fields[3]] = { 'length': int(fields[2]),
                                                                  'evalue': float(fields[6]),
                                                                  'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])),
                                                                  'hmm_length': int(fields[5]),
@@ -166,7 +183,7 @@ def find_best_cas ():
                         if int(fields[16]) > genes[fields[0]]['annotations'][fields[3]]['hmm_end']:
                             genes[fields[0]]['annotations'][fields[3]]['hmm_end'] = int(fields[16])
     else:
-        genes['no_genes'] = {'len': 0,
+        genes['no_genes'] = {'length': 0,
                              'start': 0,
                              'end': 1,
                              'partial': 00,
@@ -180,8 +197,10 @@ def find_best_cas ():
     for g in genes:
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
-            if score < genes[fields[0]]['score'] and genes[g]['annotations'][a]['aligned'] >= 0.7:
-                if a in list_effectors: genes[g]['effector'] = 'TRUE'
+            if score < genes[fields[0]]['score']:
+                if a in list_effectors: 
+                    genes[g]['effector'] = 'TRUE'
+                genes[g]['annotation'] = a
                 genes[g]['length'] = genes[g]['annotations'][a]['length']
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
@@ -192,12 +211,15 @@ def find_best_cas ():
     return (genes, strand)
 
 ## Write output ##
-def write_output(results, options):
+def write_output(results):
     outfile = options.output + '/Results.tsv'
+    outfasta = options.output + '/Effector.fasta'
+    fasta_effectors = ''
     report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t\
               Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t\
-              Efector\tLargo efector\tLength HMM efectoy\tStart HMM efector\tEnd HMM efector\t\
-              Start Cas\tEnd Cas\tCas cassette\n'
+              Start Cas\tEnd Cas\tCas cassette\tEfector\tLargo efector\t\
+              Length HMM efector\tStart HMM efector\tEnd HMM efector\t\
+              Sequence efector\n'
     for c in results:
         start_dr = 0
         end_dr =0
@@ -220,26 +242,22 @@ def write_output(results, options):
         effector = []
         strand = 0
         for cas in results[c]['genes']:
-            cas_cassette.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'],
+            cas_cassette .append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'],
                                  results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
             if results[c]['genes'][cas]['effector'] == 'TRUE':
-                effector.append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length'],
-                                 results[c]['genes'][cas]['hmm_length'], results[c]['genes'][cas]['hmm_start'],
-                                 results[c]['genes'][cas]['hmm_end']))
+                effector = [results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length'],
+                            results[c]['genes'][cas]['hmm_length'], results[c]['genes'][cas]['hmm_start'],
+                            results[c]['genes'][cas]['hmm_end'], results[c]['genes'][cas]['sequence']]
         if results[c]['strand']==1:
             cas_cassette.sort(key=lambda x:x[1])
         else:
             cas_cassette.sort(key=lambda x:x[1], reverse=True)
-
+ 
         report += c + '\t' + str(number_repeats) + '\t' + str(len(results[c]['crisprs']['dr'])) + '\t' + str(results[c]['strand']) + '\t'
         report += str(start_dr) + '\t' + str(end_dr) + '\t' + results[c]['crisprs']['dr'] + '\t'
         report += str(results[c]['crisprs']['mismatchs']) + '\t'
         report += str(number_repeats - 1) + '\t' + str(round(avg_length,2)) + '\t'
-        if effector:
-            report += effector[0][0] + '\t' + str(effector[0][1]) + '\t' + str(effector[0][2]) + '\t'
-            report += str(effector[0][3]) + '\t' + str(effector[0][4]) + '\t'
-        else:
-            report += 'No effector found\t0\t'
+
         if cas_cassette:
             report += str(cas_cassette[0][1]) + '\t' + str(cas_cassette[-1][2]) + '\t'
             for cas in cas_cassette:
@@ -247,10 +265,19 @@ def write_output(results, options):
                if cas[3] != '00': report += '*' # If partial, add '*' to the name of the gene
                report += ';'
             report.strip(';')
+
+        if effector:
+            report += '\t' + effector[0] + '\t' + str(effector[1]) + '\t' + str(effector[2]) + '\t'
+            report += str(effector[3]) + '\t' + str(effector[4]) + '\t' + str(effector[5]) + '\t'
+            fasta_effectors += '>' + c + '_' + effector[0] + '\n' + str(effector[5]) + '\n'
+        else:
+            report += 'No effector found\t0\t\t\t\t\t\t'
         report += '\n'
 
     with open (outfile, 'w') as o:
         o.write(report)
+    with open (outfasta, 'w') as of:
+        of.write(fasta_effectors)
 
 ## Main ##
 def main():
@@ -258,6 +285,7 @@ def main():
     #if not bool_dependencies:
         #install_dependencies()
     parser = argparse.ArgumentParser(description='')
+    global options
     options = parse_option(parser)
 
     if not re.match('^/', options.output):
@@ -267,35 +295,33 @@ def main():
         exit()
     if not os.path.exists(options.output):
         os.makedirs(options.output)
-    if not os.path.exists(temp_dir):
-        #shutil.rmtree(temp_dir)
-        os.makedirs (temp_dir)
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs (temp_dir)
+
+    now = time.process_time()
+    msg = 'Process started at ' + str(time.asctime())
+    if options.verbose: print (msg)
+
+    with open(options.input) as fin, Pool(int(options.threads)) as pool:
+        # [0]: record.id; [1] repeats; [2]: genes, [3]: strand
+        contigs = pool.map(
+            search_everything,
+            (record for record in SeqIO.parse(fin, 'fasta')),
+            chunksize=50,
+            )
+
+    time_stamp = time.process_time() - now
+    msg = 'Process ended at '  + str(time.asctime()) + '\n'
+    msg += 'Process took ' + str(time_stamp) + ' seconds'
+    if options.verbose: print (msg)
 
     results = {}
-    with open(options.input, 'r') as in_fasta:
-        for record in SeqIO.parse(in_fasta, 'fasta'):
-            now = time.process_time()
-            msg = 'Sequence ' + record.id + ' started at ' + str(time.asctime())
-            if options.verbose: print (msg)
-
-            crisprs = look_for_spacers(record, options)
-            time_stamp = time.process_time() - now
-            msg = 'look_for_spacers took ' + str(round(time_stamp,4)) + ' seconds'
-            if options.verbose: print (msg)
-
-            now = time.process_time()
-            (genes,strand) = look_for_cas(record, options)
-            time_stamp = time.process_time() - now
-            msg = 'look_for_cas took ' + str(round(time_stamp, 4)) + ' seconds'
-            if options.verbose: print (msg)
-
-            if not 'no_genes' in genes and len(crisprs['positions']) != 0:
-                results[record.id] = {'crisprs': crisprs,
-                                      'genes': genes,
-                                      'strand': strand }
-    write_output(results, options)
-    #write_cas_fasta()
-    #shutil.rmtree(temp_dir)
+    for c in contigs:
+        if not 'no_genes' in c[2] and len(c[1]['positions']) != 0:
+            results[c[0]] = {'crisprs': c[1], 'genes': c[2], 'strand': c[3] }
+    write_output(results)
+    shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
     main()
