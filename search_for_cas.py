@@ -48,20 +48,22 @@ def search_everything (record):
     this_temp_dir = temp_dir + '/' + record.id
     dr = look_for_spacers(record)
     genes = look_for_cas(record)
+    strand = 0
     for g in genes:
         if genes[g]['effector']:
+            strand = genes[g]['strand']
             genes[g]['sequence'] = extract_protein (genes[g]['id'], this_temp_dir)
     if not options.keeptemp:
         shutil.rmtree(this_temp_dir)
-    return (record.id, dr, genes, genes[g]['strand'])
+    return (record.id, dr, genes, strand)
 
 def extract_protein (gene_id, temp_dir):
     translation = temp_dir + '/translation.faa'
     with open(translation, "rU") as handle:
         for record in SeqIO.parse(handle, 'fasta'):
-            if record.id == gene_id: 
+            if record.id == gene_id:
                 return str(record.seq)
-    
+
 ## Look for spacers ##
 def look_for_spacers (record):
     dr = run_vmatch2 (record)
@@ -162,7 +164,8 @@ def find_best_cas ():
                     fields = line.split()
                     if not fields[0] in genes:
                         partial = re.match('.*partial\=(\d+)', fields[29])
-                        genes[fields[0]] = {'length': int(fields[2]),
+                        genes[fields[0]] = {'id': '',
+                                            'length': int(fields[2]),
                                             'start': int(fields[23]),
                                             'end': int(fields[25]),
                                             'strand': int(fields[27]),
@@ -174,7 +177,7 @@ def find_best_cas ():
                                             'effector':'FALSE',
                                             'annotations': {} }
                     if not fields[3] in genes[fields[0]]['annotations']:
-                        genes[fields[0]]['annotations'][fields[3]] = {  'id': fields[0],
+                        genes[fields[0]]['annotations'][fields[3]] = { 'id': fields[0],
                                                                  'length': int(fields[2]),
                                                                  'evalue': float(fields[6]),
                                                                  'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])),
@@ -189,7 +192,9 @@ def find_best_cas ():
                         if int(fields[16]) > genes[fields[0]]['annotations'][fields[3]]['hmm_end']:
                             genes[fields[0]]['annotations'][fields[3]]['hmm_end'] = int(fields[16])
     else:
-        genes['no_genes'] = {'length': 0,
+        genes['no_genes'] = {'id': 'None_found',
+                             'length': 0,
+                             'strand': 0,
                              'start': 0,
                              'end': 1,
                              'partial': 00,
@@ -204,10 +209,10 @@ def find_best_cas ():
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
             if score < genes[fields[0]]['score']:
-                if a in list_effectors: 
+                if a in list_effectors:
                     genes[g]['effector'] = 'TRUE'
                 genes[g]['annotation'] = a
-                genes[g]['id'] = genes[g]['annotations'][a]['id']                
+                genes[g]['id'] = genes[g]['annotations'][a]['id']
                 genes[g]['length'] = genes[g]['annotations'][a]['length']
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
