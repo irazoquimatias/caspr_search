@@ -37,6 +37,7 @@ def parse_option(parser):
     parser.add_argument('--meta', action='store_true')
     parser.add_argument('--profiles', default=profile_path, help='Archivo con los perfiles a buscar')
     parser.add_argument('-t', '--threads', type=int, default=1, help='Numero de procesadores')
+    parser.add_argument('-k', '--keeptemp', action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
     args.profiles = os.path.abspath(args.profiles)
@@ -54,7 +55,8 @@ def search_everything (record):
             gene_aa = str(gene_nt.translate())
             genes[g]['sequence'] = gene_aa
     this_temp_dir = temp_dir + '/' + record.id
-    shutil.rmtree(this_temp_dir)
+    if not options.keeptemp:
+        shutil.rmtree(this_temp_dir)
     return (record.id, dr, genes, strand)
 
 ## Look for spacers ##
@@ -158,6 +160,7 @@ def find_best_cas ():
                     if not fields[0] in genes:
                         partial = re.match('.*partial\=(\d+)', fields[29])
                         strand=int(fields[27])
+                        print (fields[23], fields[25], fields[27], fields[29])
                         genes[fields[0]] = {'length': int(fields[2]),
                                             'start': int(fields[23]),
                                             'end': int(fields[25]),
@@ -252,7 +255,7 @@ def write_output(results):
             cas_cassette.sort(key=lambda x:x[1])
         else:
             cas_cassette.sort(key=lambda x:x[1], reverse=True)
- 
+
         report += c + '\t' + str(number_repeats) + '\t' + str(len(results[c]['crisprs']['dr'])) + '\t' + str(results[c]['strand']) + '\t'
         report += str(start_dr) + '\t' + str(end_dr) + '\t' + results[c]['crisprs']['dr'] + '\t'
         report += str(results[c]['crisprs']['mismatchs']) + '\t'
@@ -321,7 +324,8 @@ def main():
         if not 'no_genes' in c[2] and len(c[1]['positions']) != 0:
             results[c[0]] = {'crisprs': c[1], 'genes': c[2], 'strand': c[3] }
     write_output(results)
-    shutil.rmtree(temp_dir)
+    if not options.keeptemp:
+        shutil.rmtree(temp_dir)
 
 if __name__ == '__main__':
     main()
