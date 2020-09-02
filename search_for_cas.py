@@ -45,20 +45,23 @@ def parse_option(parser):
 
 ## Search everything
 def search_everything (record):
+    this_temp_dir = temp_dir + '/' + record.id
     dr = look_for_spacers(record)
-    (genes,strand) = look_for_cas(record)
+    genes = look_for_cas(record)
     for g in genes:
         if genes[g]['effector']:
-            gene_nt = Seq(str(record.seq)[(genes[g]['start']-1):genes[g]['end']])
-            if strand == -1:
-                gene_nt = gene_nt.reverse_complement()
-            gene_aa = str(gene_nt.translate())
-            genes[g]['sequence'] = gene_aa
-    this_temp_dir = temp_dir + '/' + record.id
+            genes[g]['sequence'] = extract_protein (genes[g]['id'], this_temp_dir)
     if not options.keeptemp:
         shutil.rmtree(this_temp_dir)
-    return (record.id, dr, genes, strand)
+    return (record.id, dr, genes, genes[g]['strand'])
 
+def extract_protein (gene_id, temp_dir):
+    translation = temp_dir + '/translation.faa'
+    with open(translation, "rU") as handle:
+        for record in SeqIO.parse(handle, 'fasta'):
+            if record.id == gene_id: 
+                return str(record.seq)
+    
 ## Look for spacers ##
 def look_for_spacers (record):
     dr = run_vmatch2 (record)
@@ -159,11 +162,10 @@ def find_best_cas ():
                     fields = line.split()
                     if not fields[0] in genes:
                         partial = re.match('.*partial\=(\d+)', fields[29])
-                        strand=int(fields[27])
-                        print (fields[23], fields[25], fields[27], fields[29])
                         genes[fields[0]] = {'length': int(fields[2]),
                                             'start': int(fields[23]),
                                             'end': int(fields[25]),
+                                            'strand': int(fields[27]),
                                             'partial': partial.group(1),
                                             'annotation': '',
                                             'evalue': 9999,
@@ -172,7 +174,8 @@ def find_best_cas ():
                                             'effector':'FALSE',
                                             'annotations': {} }
                     if not fields[3] in genes[fields[0]]['annotations']:
-                        genes[fields[0]]['annotations'][fields[3]] = { 'length': int(fields[2]),
+                        genes[fields[0]]['annotations'][fields[3]] = {  'id': fields[0],
+                                                                 'length': int(fields[2]),
                                                                  'evalue': float(fields[6]),
                                                                  'aligned': ((int(fields[18]) - int(fields[17]) + 1)/int(fields[2])),
                                                                  'hmm_length': int(fields[5]),
@@ -196,7 +199,7 @@ def find_best_cas ():
                              'score':999,
                              'effector':'FALSE',
                              'annotations': {} }
-        return (genes, strand)
+        return (genes)
     for g in genes:
         for a in genes[g]['annotations']:
             score = genes[g]['annotations'][a]['evalue']/genes[g]['annotations'][a]['aligned']
@@ -204,6 +207,7 @@ def find_best_cas ():
                 if a in list_effectors: 
                     genes[g]['effector'] = 'TRUE'
                 genes[g]['annotation'] = a
+                genes[g]['id'] = genes[g]['annotations'][a]['id']                
                 genes[g]['length'] = genes[g]['annotations'][a]['length']
                 genes[g]['evalue'] = genes[g]['annotations'][a]['evalue']
                 genes[g]['aligned'] = genes[g]['annotations'][a]['aligned']
@@ -211,18 +215,18 @@ def find_best_cas ():
                 genes[g]['hmm_start'] = genes[g]['annotations'][a]['hmm_start']
                 genes[g]['hmm_end'] = genes[g]['annotations'][a]['hmm_end']
                 genes[g]['score'] = score
-    return (genes, strand)
+    return (genes)
 
 ## Write output ##
 def write_output(results):
     outfile = options.output + '/Results.tsv'
     outfasta = options.output + '/Effector.fasta'
     fasta_effectors = ''
-    report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t\
-              Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t\
-              Start Cas\tEnd Cas\tCas cassette\tEfector\tLargo efector\t\
-              Length HMM efector\tStart HMM efector\tEnd HMM efector\t\
-              Sequence efector\n'
+    report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t'
+    report += 'Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t'
+    report += 'Start Cas\tEnd Cas\tCas cassette\tEfector\tLargo efector\t'
+    report += 'Length HMM efector\tStart HMM efector\tEnd HMM efector\t'
+    report += 'Sequence efector\n'
     for c in results:
         start_dr = 0
         end_dr =0
@@ -242,11 +246,14 @@ def write_output(results):
             avg_length = length / (number_repeats - 1)
 
         cas_cassette = []
+        ids = []
         effector = []
         strand = 0
         for cas in results[c]['genes']:
-            cas_cassette .append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'],
-                                 results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
+            if results[c]['genes'][cas]['id'] not in ids:
+                cas_cassette .append((results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['start'],
+                                      results[c]['genes'][cas]['end'], results[c]['genes'][cas]['partial']))
+                ids.append(results[c]['genes'][cas]['id'])
             if results[c]['genes'][cas]['effector'] == 'TRUE':
                 effector = [results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length'],
                             results[c]['genes'][cas]['hmm_length'], results[c]['genes'][cas]['hmm_start'],
