@@ -20,7 +20,8 @@ profile_path = script_dir + '/data/profiles.hmm'
 temp_dir = '/tmp/caspr_search'
 list_effectors = ['cas12d', 'cas12e', 'cas12i', 'cas13d', 'cas14a',
                  'cas14b', 'cas14c', 'cas14d', 'cas14e', 'cas14f',
-                 'cas14g', 'cas14h', 'cas14u']
+                 'cas14g', 'cas14h', 'cas14u', 'cas13b_0', 'cas12c',
+                 'cas12a_1']
 
 ## Check dependencies ##
 #def check_dependencies()
