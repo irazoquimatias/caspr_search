@@ -18,10 +18,12 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = script_dir + '/data/sel392v2.so'
 profile_path = script_dir + '/data/profiles.hmm'
 temp_dir = '/tmp/caspr_search'
-list_effectors = ['cas12d', 'cas12e', 'cas12i', 'cas13d', 'cas14a',
-                 'cas14b', 'cas14c', 'cas14d', 'cas14e', 'cas14f',
-                 'cas14g', 'cas14h', 'cas14u', 'cas13b_0', 'cas12c',
-                 'cas12a_1']
+list_effectors = ['cas12a_1', 'cas12b', 'cas12c', 'cas12d',
+          'cas12e', 'cas12i', 'cas13d', 'cas12d', 'cas12e',
+          'cas12i', 'cas13d', 'cas14a', 'cas14b', 'cas14c',
+          'cas14d', 'cas14e', 'cas14f', 'cas14g', 'cas14h',
+          'cas14u', 'cas13a', 'cas13b_0', 'cas13b_1', 'cas13c' ]
+
 
 ## Check dependencies ##
 #def check_dependencies()
@@ -231,7 +233,8 @@ def write_output(results):
     report = 'Contig\t# repeats\tLength repeats\tStrand\tStart repeats\tEnd repeats\t'
     report += 'Sequence repeat\t# repeats w/mismatchs\t#CRISPRs\tAvg length CRISPR\t'
     report += 'Start Cas\tEnd Cas\tCas cassette\tEfector\tLargo efector\t'
-    report += 'Length HMM efector\tStart HMM efector\tEnd HMM efector\t'
+    report += 'Start efector contig\tEnd efector contig\t'
+    report += 'Length HMM\tStart HMM\tEnd HMM\t'
     report += 'Sequence efector\n'
     for c in results:
         start_dr = 0
@@ -262,6 +265,7 @@ def write_output(results):
                 ids.append(results[c]['genes'][cas]['id'])
             if results[c]['genes'][cas]['effector'] == 'TRUE':
                 effector = [results[c]['genes'][cas]['annotation'], results[c]['genes'][cas]['length'],
+                            results[c]['genes'][cas]['start'], results[c]['genes'][cas]['end'],
                             results[c]['genes'][cas]['hmm_length'], results[c]['genes'][cas]['hmm_start'],
                             results[c]['genes'][cas]['hmm_end'], results[c]['genes'][cas]['sequence']]
         if results[c]['strand']==1:
@@ -285,7 +289,8 @@ def write_output(results):
         if effector:
             report += '\t' + effector[0] + '\t' + str(effector[1]) + '\t' + str(effector[2]) + '\t'
             report += str(effector[3]) + '\t' + str(effector[4]) + '\t' + str(effector[5]) + '\t'
-            fasta_effectors += '>' + c + '_' + effector[0] + '\n' + str(effector[5]) + '\n'
+            report += str(effector[6]) + '\t' + str(effector[7]) + '\t'
+            fasta_effectors += '>' + c + '_' + effector[0] + '\n' + str(effector[7]) + '\n'
         else:
             report += 'No effector found\t0\t\t\t\t\t\t'
         report += '\n'
