@@ -102,6 +102,8 @@ def run_vmatch2 (record):
             continue
         (score, positions, mismatchs) = run_fuzznuc(line, cont)
         cont += 1
+        if len(line) < options.minspacer or len(line) > options.maxspacer:
+            continue
         if score > best['score']:
             best['score'] = score
             best['positions'] = positions
@@ -292,7 +294,7 @@ def write_output(results):
             report += str(effector[6]) + '\t' + str(effector[7]) + '\t'
             fasta_effectors += '>' + c + '_' + effector[0] + '\n' + str(effector[7]) + '\n'
         else:
-            report += 'No effector found\t0\t\t\t\t\t\t'
+            report += '\tNo effector found\t\t\t\t\t\t'
         report += '\n'
 
     with open (outfile, 'w') as o:
